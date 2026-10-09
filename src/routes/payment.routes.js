@@ -10,10 +10,12 @@ router.get('/', authenticate, (req, res) => {
     const merchantId = req.user.id;
     const payments = getPayments(merchantId);
 
-    // BUG A: Amount is being converted to string instead of remaining as number
+    // FIX (Bug A): Return the amount as a number. Converting it to a string
+    // broke client-side math (currency totals came out as NaN or string
+    // concatenations instead of sums).
     const formattedPayments = payments.map(p => ({
       id: p.id,
-      amount: p.amount.toString(), // ← BUG: Should be number, not string
+      amount: parseFloat(p.amount),
       currency: p.currency,
       status: p.status,
       customer_email: p.customer_email,
@@ -49,7 +51,7 @@ router.get('/:id', authenticate, (req, res) => {
       success: true,
       data: {
         id: payment.id,
-        amount: payment.amount.toString(), // Same bug as above
+        amount: parseFloat(payment.amount), // FIX (Bug A): keep amount numeric
         currency: payment.currency,
         status: payment.status,
         customer_email: payment.customer_email,
@@ -72,9 +74,12 @@ router.post('/', authenticate, (req, res) => {
       return res.status(400).json({ error: 'Valid amount is required' });
     }
 
-    // BUG B: No maximum amount check - allows unrealistic amounts
-    // Real systems should have limits (e.g., max €50,000 per transaction)
-    // Missing: if (amount > 50000) { return 400 }
+    // FIX (Bug B): Enforce a maximum transaction amount (€50,000).
+    // Without a cap, a client could create unrealistic payments
+    // (e.g. €999,999,999) that break settlement and reporting downstream.
+    if (amount > 50000) {
+      return res.status(400).json({ error: 'Amount exceeds the maximum transaction limit of €50,000' });
+    }
 
     if (!currency || !['EUR', 'USD', 'GBP'].includes(currency)) {
       return res.status(400).json({ error: 'Valid currency is required (EUR, USD, GBP)' });
